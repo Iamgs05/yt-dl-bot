@@ -1,8 +1,10 @@
+
+
+
 import os
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-import asyncio
 import tempfile
 
 TOKEN = os.environ.get("8613468671:AAFLxqutr5zyHRZtnV837EVaxqG8x8csvR8")
@@ -21,43 +23,43 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     user_id = update.message.from_user.id
 
-    if "youtube.com" not in url and "youtu.be" not in url and "instagram.com" not in url:
-        await update.message.reply_text("❌ Please send a valid YouTube or Instagram link!")
+    is_yt = "youtube.com" in url or "youtu.be" in url
+    is_ig = "instagram.com" in url
+
+    if not is_yt and not is_ig:
+        await update.message.reply_text("❌ Send a valid YouTube or Instagram link!")
         return
 
     user_links[user_id] = url
-    await update.message.reply_text("⏳ Fetching info...")
+    msg = await update.message.reply_text("⏳ Fetching info...")
 
     try:
-        ydl_opts = {'quiet': True, 'no_warnings': True}
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             title = info.get('title', 'Video')[:50]
 
-        keyboard = []
-
-        if "instagram.com" in url:
+        if is_ig:
             keyboard = [
-                [InlineKeyboardButton("🎥 Video (Best)", callback_data=f"video_best")],
-                [InlineKeyboardButton("🎵 Audio MP3", callback_data=f"audio_mp3")],
+                [InlineKeyboardButton("🎥 Video (Best)", callback_data="video_best")],
+                [InlineKeyboardButton("🎵 Audio MP3", callback_data="audio_mp3")],
             ]
         else:
             keyboard = [
-                [InlineKeyboardButton("🎥 Video 360p", callback_data="video_360")],
-                [InlineKeyboardButton("🎥 Video 720p", callback_data="video_720")],
-                [InlineKeyboardButton("🎥 Video 1080p", callback_data="video_1080")],
+                [InlineKeyboardButton("🎥 360p", callback_data="video_360")],
+                [InlineKeyboardButton("🎥 720p", callback_data="video_720")],
+                [InlineKeyboardButton("🎥 1080p", callback_data="video_1080")],
                 [InlineKeyboardButton("🎵 Audio MP3", callback_data="audio_mp3")],
             ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"🎬 *{title}*\n\nChoose download format:",
+        await msg.edit_text(
+            f"🎬 *{title}*\n\nChoose format:",
             parse_mode='Markdown',
-            reply_markup=reply_markup
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Error fetching video info. Try another link.\n`{str(e)[:100]}`", parse_mode='Markdown')
+        await msg.edit_text(f"❌ Could not fetch video.\n`{str(e)[:200]}`", parse_mode='Markdown')
 
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -72,47 +74,37 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = user_links[user_id]
     await query.edit_message_text("⬇️ Downloading... please wait!")
 
+    format_map = {
+        "audio_mp3": {
+            'format': 'bestaudio/best',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+        },
+        "video_360": {
+            'format': 'bestvideo[height<=360]+bestaudio/best',
+            'merge_output_format': 'mp4'
+        },
+        "video_720": {
+            'format': 'bestvideo[height<=720]+bestaudio/best',
+            'merge_output_format': 'mp4'
+        },
+        "video_1080": {
+            'format': 'bestvideo[height<=1080]+bestaudio/best',
+            'merge_output_format': 'mp4'
+        },
+        "video_best": {
+            'format': 'bestvideo+bestaudio/best',
+            'merge_output_format': 'mp4'
+        },
+    }
+
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            if choice == "audio_mp3":
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                    'quiet': True,
-                }
-            elif choice == "video_360":
-                ydl_opts = {
-                    'format': 'bestvideo[height<=360]+bestaudio/best[height<=360]',
-                    'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
-                    'merge_output_format': 'mp4',
-                    'quiet': True,
-                }
-            elif choice == "video_720":
-                ydl_opts = {
-                    'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
-                    'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
-                    'merge_output_format': 'mp4',
-                    'quiet': True,
-                }
-            elif choice == "video_1080":
-                ydl_opts = {
-                    'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-                    'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
-                    'merge_output_format': 'mp4',
-                    'quiet': True,
-                }
-            elif choice == "video_best":
-                ydl_opts = {
-                    'format': 'bestvideo+bestaudio/best',
-                    'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
-                    'merge_output_format': 'mp4',
-                    'quiet': True,
-                }
+            ydl_opts = {
+                **format_map[choice],
+                'outtmpl': f'{tmpdir}/%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+            }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -126,7 +118,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filesize = os.path.getsize(filepath) / (1024 * 1024)
 
             if filesize > 50:
-                await query.edit_message_text(f"❌ File too large ({filesize:.1f}MB). Telegram limit is 50MB. Try lower quality.")
+                await query.edit_message_text(
+                    f"❌ File too large ({filesize:.1f}MB). Telegram max is 50MB. Try lower quality."
+                )
                 return
 
             await query.edit_message_text("📤 Uploading to Telegram...")
@@ -136,13 +130,13 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_audio(
                         chat_id=query.message.chat_id,
                         audio=f,
-                        caption="🎵 Here's your audio!"
+                        caption="🎵 Here's your audio! Enjoy 🎶"
                     )
                 else:
                     await context.bot.send_video(
                         chat_id=query.message.chat_id,
                         video=f,
-                        caption="🎥 Here's your video!",
+                        caption="🎥 Here's your video! Enjoy 🎉",
                         supports_streaming=True
                     )
 
@@ -150,15 +144,17 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del user_links[user_id]
 
     except Exception as e:
-        await query.edit_message_text(f"❌ Failed: `{str(e)[:150]}`", parse_mode='Markdown')
+        await query.edit_message_text(f"❌ Failed: `{str(e)[:200]}`", parse_mode='Markdown')
 
 def main():
+    if not TOKEN:
+        raise ValueError("BOT_TOKEN environment variable not set!")
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
     app.add_handler(CallbackQueryHandler(handle_button))
     print("🤖 Bot is running!")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
